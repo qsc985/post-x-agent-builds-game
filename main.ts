@@ -17,14 +17,36 @@ import { join } from 'node:path';
 const BOT_DIR = process.env.MAKEFUN_BOT_DIR ?? '/bot';
 const OUTPUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
+const STATUS_URL = /^https:\/\/(?:x\.com|twitter\.com)\/[A-Za-z0-9_]+\/status\/\d+$/;
+
 mkdirSync(OUTPUT_DIR, { recursive: true });
 try {
   // Fail loudly on a malformed POST.json instead of handing the gate a bad file.
-  const parsed = JSON.parse(readFileSync(join(BOT_DIR, 'POST.json'), 'utf8')) as { url?: unknown };
+  let raw: string;
+  try {
+    raw = readFileSync(join(BOT_DIR, 'POST.json'), 'utf8');
+  } catch {
+    throw new Error(`POST.json is missing from ${BOT_DIR} — post the video first, then write its address into POST.json`);
+  }
+  let parsed: { url?: unknown };
+  try {
+    parsed = JSON.parse(raw) as { url?: unknown };
+  } catch (err) {
+    throw new Error(`POST.json could not be parsed as JSON: ${(err as Error).message}`);
+  }
   if (typeof parsed.url !== 'string' || !parsed.url.startsWith('https://')) {
     throw new Error('POST.json has no https url field');
   }
+  if (!STATUS_URL.test(parsed.url)) {
+    throw new Error(`POST.json url is not an X status URL (expected https://x.com/<handle>/status/<digits>): ${parsed.url}`);
+  }
   copyFileSync(join(BOT_DIR, 'POST.json'), join(OUTPUT_DIR, 'POST.json'));
+  // Verify the copy actually landed: read the output back and compare bytes.
+  const written = readFileSync(join(OUTPUT_DIR, 'POST.json'), 'utf8');
+  if (written !== raw) {
+    throw new Error('POST.json was copied but the output does not match the source');
+  }
+  console.log(`POST.json copied: ${parsed.url}`);
 } catch (err) {
   console.error(`POST.json could not be copied from ${BOT_DIR}: ${(err as Error).message}`);
   process.exit(1);
